@@ -4,39 +4,74 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'Minha_Estante_Organizador_V4_117.html'
-      - '.github/workflows/build-apk.yml'
+      - "Minha_Estante_Organizador_V4_117.html"
+      - ".github/workflows/build-apk.yml"
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Compilar aplicativo Android
+    runs-on: ubuntu-24.04
 
     steps:
-      - name: Baixar código
+
+      # 1. Baixar os arquivos do repositório
+      - name: Baixar projeto
         uses: actions/checkout@v4
 
+      # 2. Node.js
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: "22"
 
+      # 3. Java
       - name: Configurar Java
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: '21'
+          distribution: "temurin"
+          java-version: "21"
 
+      # 4. Android SDK
       - name: Configurar Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
-      - name: Instalar ferramentas Android
+      # 5. Instalar componentes necessários do Android
+      - name: Instalar Android SDK
+        shell: bash
         run: |
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
-          yes | sdkmanager --licenses || true
+          set -e
 
-      - name: Criar projeto Capacitor
+          yes | sdkmanager --licenses >/dev/null || true
+
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+          yes | sdkmanager --licenses >/dev/null || true
+
+      # 6. Conferir ferramentas
+      - name: Conferir ambiente
+        shell: bash
         run: |
+          node --version
+          npm --version
+          java -version
+          adb version
+          sdkmanager --version
+
+      # 7. Criar estrutura do aplicativo
+      - name: Criar estrutura Capacitor
+        shell: bash
+        run: |
+          set -e
+
           mkdir -p app/www
+
+          if [ ! -f "Minha_Estante_Organizador_V4_117.html" ]; then
+            echo "ERRO: Minha_Estante_Organizador_V4_117.html não foi encontrado."
+            exit 1
+          fi
 
           cp "Minha_Estante_Organizador_V4_117.html" "app/www/index.html"
 
@@ -46,34 +81,98 @@ jobs:
           {
             "name": "minha-estante",
             "version": "1.0.0",
-            "private": true,
-            "scripts": {
-              "build": "echo Aplicação HTML pronta"
-            }
+            "private": true
           }
           EOF
 
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+      # 8. Instalar Capacitor
+      - name: Instalar Capacitor
+        working-directory: app
+        shell: bash
+        run: |
+          set -e
 
+          npm install \
+            @capacitor/core@8.5.2 \
+            @capacitor/cli@8.5.2 \
+            @capacitor/android@8.5.2
+
+      # 9. Configuração do aplicativo
+      - name: Configurar aplicativo
+        working-directory: app
+        shell: bash
+        run: |
           cat > capacitor.config.json <<'EOF'
           {
             "appId": "br.com.minhaestante.app",
             "appName": "Minha Estante",
             "webDir": "www",
-            "bundledWebRuntime": false
+            "android": {
+              "backgroundColor": "#000000"
+            }
           }
           EOF
 
+      # 10. Criar projeto Android
+      - name: Criar projeto Android
+        working-directory: app
+        shell: bash
+        run: |
+          set -e
           npx cap add android
 
-      - name: Preparar aplicativo Android
+      # 11. Copiar o HTML para o Android
+      - name: Copiar aplicativo para Android
         working-directory: app
+        shell: bash
         run: |
+          set -e
           npx cap copy android
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
 
+      # 12. Verificar se o HTML foi realmente copiado
+      - name: Verificar aplicativo
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -f "app/android/app/src/main/assets/public/index.html" ]; then
+            echo "ERRO: O index.html não foi encontrado dentro do aplicativo Android."
+            exit 1
+          fi
+
+          echo "HTML encontrado dentro do aplicativo Android."
+          ls -lh "app/android/app/src/main/assets/public/index.html"
+
+      # 13. Gerar APK
+      - name: Compilar APK
+        working-directory: app/android
+        shell: bash
+        run: |
+          set -e
+
+          chmod +x gradlew
+
+          ./gradlew assembleDebug \
+            --no-daemon \
+            --stacktrace
+
+      # 14. Verificar APK
+      - name: Verificar APK
+        shell: bash
+        run: |
+          set -e
+
+          APK="app/android/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERRO: O APK não foi criado."
+            exit 1
+          fi
+
+          echo "APK criado com sucesso:"
+          ls -lh "$APK"
+
+      # 15. Disponibilizar APK para download
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
         with:
